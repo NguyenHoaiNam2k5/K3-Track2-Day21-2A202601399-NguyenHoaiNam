@@ -8,6 +8,7 @@ data/train_phase2.csv
 sa-key.json
 .env
 .venv/
+gha-creds-*.json
 __pycache__/
 *.pyc
 .DS_Store

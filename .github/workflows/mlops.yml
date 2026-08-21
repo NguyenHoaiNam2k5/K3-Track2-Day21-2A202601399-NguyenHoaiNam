@@ -60,16 +60,46 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Authenticate to Cloud Storage
-        env:
-          CLOUD_CREDENTIALS: ${{ secrets.CLOUD_CREDENTIALS }}
+      - name: Authenticate to Google Cloud
+        id: gcp_auth
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.CLOUD_CREDENTIALS }}
+
+      - name: Configure DVC credentials
         run: |
-          printf '%s' "$CLOUD_CREDENTIALS" > /tmp/sa-key.json
-          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json" >> "$GITHUB_ENV"
-          dvc remote modify --local myremote credentialpath /tmp/sa-key.json
+          dvc remote modify --local myremote credentialpath \
+            "${{ steps.gcp_auth.outputs.credentials_file_path }}"
+
+      - name: Verify GCS access and DVC cache
+        env:
+          CLOUD_BUCKET: ${{ secrets.CLOUD_BUCKET }}
+        run: |
+          python - <<'PY'
+          import os
+          from google.cloud import storage
+
+          bucket_name = os.environ["CLOUD_BUCKET"]
+          client = storage.Client()
+          blobs = list(
+              client.list_blobs(
+                  bucket_name,
+                  prefix="dvc/files/md5/",
+                  max_results=1,
+              )
+          )
+
+          if not blobs:
+              raise SystemExit(
+                  f"No DVC cache found under "
+                  f"gs://{bucket_name}/dvc/files/md5/. Run dvc push locally."
+              )
+
+          print(f"GCS access verified for bucket {bucket_name}.")
+          PY
 
       - name: Pull data with DVC
-        run: dvc pull data/train_phase1.csv.dvc data/eval.csv.dvc
+        run: dvc pull -v data/train_phase1.csv.dvc data/eval.csv.dvc
 
       - name: Train model
         run: python src/train.py
